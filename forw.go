@@ -77,19 +77,20 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
         }(elem)
     }
     resp := MakeHTTPReq(string(conf.Proxy), mainReq, b) // forward the original req and get resp
-    body := []byte("forw.go: No Response to pass back!")
-    var err error
     if resp != nil {
-        body, err = ioutil.ReadAll(resp.Body)
-        defer resp.Body.Close() // close resp after reading body!!!
+        body, err := ioutil.ReadAll(resp.Body)
         if err != nil {
             if *debug {
                 fmt.Printf("Failed to read resp from %s, %v\n", conf.Proxy, err)
             }
             return
         }
+        defer resp.Body.Close() // close resp after reading body!!!
+        if body == nil && *debug {
+            fmt.Println("Empty Body Response")
+        }
+        w.Write(body) // write the response back
     }
-    w.Write(body) // write the response back
 }
 
 func MakeHTTPReq(t string, req *http.Request, b []byte) (resp *http.Response){
@@ -133,52 +134,42 @@ type Target string
 
 var conf Config // for global access
 
-func main(){
-    flag.Parse()
-    if _, err := os.Stat(*file); os.IsNotExist(err) {
-        fmt.Printf("Config file '%s' does not exist!\n", *file,)
-        return
+func LoadJsonFromFile(file string, c *Config) (err error){
+    if _, err = os.Stat(file); os.IsNotExist(err) {
+        fmt.Printf("Config file '%s' does not exist!\n", file,)
+        return err
     }
-    fmt.Println("Using config file: ", *file)
-    content, err := ioutil.ReadFile(*file)
+    fmt.Println("Using config file: ", file)
+    content, err := ioutil.ReadFile(file)
     if err != nil {
         fmt.Print("Error reading config file: ", err)
-        return
+        return err
     }
-    err = json.Unmarshal(content, &conf) // parse json into conf
-    if err != nil {
+    err = json.Unmarshal(content, &c) // parse json into conf
+        if err != nil {
         fmt.Print("Error in Json: ", err)
-        return
+        return err
     }
     if *debug {
-        fmt.Printf("Loaded JSON: %#v\n", conf)
+        fmt.Printf("Loaded JSON: %#v\n", c)
+    }
+    return err
+}
+
+func main(){
+    flag.Parse()
+    err := LoadJsonFromFile(*file, &conf)
+    if err != nil {
+        return
     }
     sigc := make(chan os.Signal, 1)
    	signal.Notify(sigc, syscall.SIGHUP)
     go func(){
-		for {
-        	s := <- sigc
-        	fmt.Println(s)
-        	if _, err := os.Stat(*file); os.IsNotExist(err) {
-        	fmt.Printf("Config file '%s' does not exist!\n", *file,)
-        	return
-        	}
-        	fmt.Println("Using config file: ", *file)
-        	content, err := ioutil.ReadFile(*file)
-        	if err != nil {
-        	    fmt.Print("Error reading config file: ", err)
-        	    return
-        	}
-        	err = json.Unmarshal(content, &conf) // parse json into conf
-        	if err != nil {
-        	    fmt.Print("Error in Json: ", err)
-        	    return
-        	}
-        	if *debug {
-        	    fmt.Printf("Loaded JSON: %#v\n", conf)
-        	}
-        	fmt.Print("reloaded json!")
-		}
+        for {
+            <- sigc // wait for channel to populate
+            LoadJsonFromFile(*file, &conf)
+            fmt.Println("Reloaded JSON!")
+        }
     }()
     
     tcpListen, err := net.Listen("tcp", string(conf.Listen))
