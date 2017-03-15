@@ -13,6 +13,7 @@ import (
     "net"
     "net/http"
     "net/http/httputil"
+    "time"
 )
 
 var (
@@ -29,8 +30,8 @@ func (nopCloser) Close() error { return nil }
 func DuplicateRequest(request *http.Request) (request1 *http.Request, request2 *http.Request) {
     b1 := new(bytes.Buffer)
     b2 := new(bytes.Buffer)
-    w := io.MultiWriter(b1, b2)
-    io.Copy(w, request.Body)
+    wc := io.MultiWriter(b1, b2)
+    io.Copy(wc, request.Body)
     defer request.Body.Close()
     request1 = &http.Request{
         Method:        request.Method,
@@ -70,14 +71,16 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     mainReq, otherReq := DuplicateRequest(req) // dup the whole request
     b, _ := ioutil.ReadAll(otherReq.Body) // store the body once since it won't change
     for _, elem := range conf.Forwards {
-        go func(el Target){
+        go func(el Target) {
             _, otherReq = DuplicateRequest(req)
             otherReq.Body = ioutil.NopCloser(bytes.NewBuffer(b)) // reset the body to original 
-            MakeHTTPReq(string(el), otherReq, b) // ignore response
+            MakeHTTPReq(string(el), otherReq, b, true) // ignore response and auto close for us
         }(elem)
     }
-    resp := MakeHTTPReq(string(conf.Proxy), mainReq, b) // forward the original req and get resp
+    resp, conn := MakeHTTPReq(string(conf.Proxy), mainReq, b, false) // forward the original req and get resp
+    defer conn.Close()
     if resp != nil {
+        fmt.Println(resp.Body)
         body, err := ioutil.ReadAll(resp.Body)
         if err != nil {
             if *debug {
@@ -89,21 +92,28 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
         if body == nil && *debug {
             fmt.Println("Empty Body Response")
         }
+        for key, value := range resp.Header {
+            w.Header()[key] = value // copy headers back
+            fmt.Println(key, value)
+        }
+        w.WriteHeader(resp.StatusCode)
         w.Write(body) // write the response back
     }
 }
 
-func MakeHTTPReq(t string, req *http.Request, b []byte) (resp *http.Response){
+func MakeHTTPReq(t string, req *http.Request, b []byte, autoClose bool) (resp *http.Response, httpConn *httputil.ClientConn){
     req.Body = ioutil.NopCloser(bytes.NewBuffer(b)) // reset the body to original 
-    tcpConn, err := net.Dial("tcp", t)
+    tcpConn, err := net.DialTimeout("tcp", t, time.Duration(time.Duration(10)*time.Second))
     if err != nil {
         if *debug {
             fmt.Printf("Can't make TCP connection to %s: %v\n", t, err)
         }
         return
     }
-    httpConn := httputil.NewClientConn(tcpConn, nil)
-    defer httpConn.Close() 
+    httpConn = httputil.NewClientConn(tcpConn, nil)
+    if autoClose {
+        defer httpConn.Close()
+    }
     err = httpConn.Write(req)
     if err != nil {
         if *debug {
@@ -118,7 +128,7 @@ func MakeHTTPReq(t string, req *http.Request, b []byte) (resp *http.Response){
         }
         return
     }
-    return resp
+    return
 }
 
 type httpHandler struct{}
