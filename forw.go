@@ -154,29 +154,31 @@ func main(){
         fmt.Printf("Loaded JSON: %#v\n", conf)
     }
     sigc := make(chan os.Signal, 1)
-    signal.Notify(sigc, syscall.SIGHUP)
+   	signal.Notify(sigc, syscall.SIGHUP)
     go func(){
-        s := <- sigc
-        fmt.Println(s)
-        if _, err := os.Stat(*file); os.IsNotExist(err) {
-        fmt.Printf("Config file '%s' does not exist!\n", *file,)
-        return
-        }
-        fmt.Println("Using config file: ", *file)
-        content, err := ioutil.ReadFile(*file)
-        if err != nil {
-            fmt.Print("Error reading config file: ", err)
-            return
-        }
-        err = json.Unmarshal(content, &conf) // parse json into conf
-        if err != nil {
-            fmt.Print("Error in Json: ", err)
-            return
-        }
-        if *debug {
-            fmt.Printf("Loaded JSON: %#v\n", conf)
-        }
-        fmt.Print("reloaded json!")
+		for {
+        	s := <- sigc
+        	fmt.Println(s)
+        	if _, err := os.Stat(*file); os.IsNotExist(err) {
+        	fmt.Printf("Config file '%s' does not exist!\n", *file,)
+        	return
+        	}
+        	fmt.Println("Using config file: ", *file)
+        	content, err := ioutil.ReadFile(*file)
+        	if err != nil {
+        	    fmt.Print("Error reading config file: ", err)
+        	    return
+        	}
+        	err = json.Unmarshal(content, &conf) // parse json into conf
+        	if err != nil {
+        	    fmt.Print("Error in Json: ", err)
+        	    return
+        	}
+        	if *debug {
+        	    fmt.Printf("Loaded JSON: %#v\n", conf)
+        	}
+        	fmt.Print("reloaded json!")
+		}
     }()
     
     tcpListen, err := net.Listen("tcp", string(conf.Listen))
