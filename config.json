@@ -1,6 +1,6 @@
 {
 	"listen": ":4000",
-	"proxy": "jobmaster.ow:80",
+	"proxy": ":8080",
 	"forwards": [
 		":4010",
 		":4020",
