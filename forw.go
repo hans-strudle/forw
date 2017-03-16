@@ -14,6 +14,7 @@ import (
     "net/http"
     "net/http/httputil"
     "time"
+	"runtime"
 )
 
 var (
@@ -71,7 +72,7 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     mainReq, otherReq := DuplicateRequest(req) // dup the whole request
     b, _ := ioutil.ReadAll(otherReq.Body) // store the body once since it won't change
     for _, elem := range conf.Forwards {
-        go func(el Target) {
+        go func(el string) {
             _, otherReq = DuplicateRequest(req)
             otherReq.Body = ioutil.NopCloser(bytes.NewBuffer(b)) // reset the body to original 
             MakeHTTPReq(string(el), otherReq, b, true) // ignore response and auto close for us
@@ -80,7 +81,6 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     resp, conn := MakeHTTPReq(string(conf.Proxy), mainReq, b, false) // forward the original req and get resp
     defer conn.Close()
     if resp != nil {
-        fmt.Println(resp.Body)
         body, err := ioutil.ReadAll(resp.Body)
         if err != nil {
             if *debug {
@@ -94,7 +94,6 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
         }
         for key, value := range resp.Header {
             w.Header()[key] = value // copy headers back
-            fmt.Println(key, value)
         }
         w.WriteHeader(resp.StatusCode)
         w.Write(body) // write the response back
@@ -103,7 +102,7 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func MakeHTTPReq(t string, req *http.Request, b []byte, autoClose bool) (resp *http.Response, httpConn *httputil.ClientConn){
     req.Body = ioutil.NopCloser(bytes.NewBuffer(b)) // reset the body to original 
-    tcpConn, err := net.DialTimeout("tcp", t, time.Duration(time.Duration(10)*time.Second))
+    tcpConn, err := net.DialTimeout("tcp", t, time.Duration(time.Duration(conf.Timeout)*time.Second))
     if err != nil {
         if *debug {
             fmt.Printf("Can't make TCP connection to %s: %v\n", t, err)
@@ -135,12 +134,11 @@ type httpHandler struct{}
 
 // static definition of our config json
 type Config struct{
-    Listen Target        // must match top level keys in json file
-    Proxy Target        // must match top level keys in json file
-    Forwards []Target    // must match top level keys in json file
+    Listen string       // must match top level keys in json file
+    Proxy string        // must match top level keys in json file
+	Timeout int
+    Forwards []string    // must match top level keys in json file
 }
-
-type Target string
 
 var conf Config // for global access
 
@@ -168,7 +166,8 @@ func LoadJsonFromFile(file string, c *Config) (err error){
 
 func main(){
     flag.Parse()
-    err := LoadJsonFromFile(*file, &conf)
+	runtime.GOMAXPROCS(runtime.NumCPU())
+    err := LoadJsonFromFile(*file, &conf) // send the Json data to conf struct
     if err != nil {
         return
     }
