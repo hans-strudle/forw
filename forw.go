@@ -14,7 +14,7 @@ import (
     "net/http"
     "net/http/httputil"
     "time"
-	"runtime"
+    "runtime"
 )
 
 var (
@@ -136,7 +136,7 @@ type httpHandler struct{}
 type Config struct{
     Listen string       // must match top level keys in json file
     Proxy string        // must match top level keys in json file
-	Timeout int
+    Timeout int
     Forwards []string    // must match top level keys in json file
 }
 
